@@ -1,0 +1,104 @@
+import os
+import numpy as np
+import pandas as pd
+import librosa
+import librosa.display
+import matplotlib.pyplot as plt
+
+# RTL text (optional)
+try:
+    from bidi.algorithm import get_display
+    import arabic_reshaper
+    HAS_RTL_LIBS = True
+except ImportError:
+    HAS_RTL_LIBS = False
+
+plt.rcParams['font.family'] = 'sans-serif'
+plt.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'Nazanin', 'DejaVu Sans', 'Arial']
+plt.rcParams['axes.unicode_minus'] = False
+
+def display_persian_text(text):
+    if HAS_RTL_LIBS:
+        return get_display(arabic_reshaper.reshape(text))
+    return text
+
+def generate_spectrograms(audio_path=None, word_onset_times=None, word_labels=None, save_path=None,
+                          n_fft=2048, hop_length=512, cmap='viridis'):
+    try:
+        if audio_path and os.path.exists(audio_path):
+            y, sr = librosa.load(audio_path, sr=None, mono=True)
+        else:
+            sr = 22050
+            duration = 5.0
+            t = np.linspace(0, duration, int(sr * duration), endpoint=False)
+            y = 0.5*np.sin(2*np.pi*440*t) + 0.3*np.sin(2*np.pi*880*t*(1 + t/duration))
+            if word_onset_times is not None:
+                valid = [i for i, tt in enumerate(word_onset_times) if 0 <= tt <= duration]
+                word_onset_times = [word_onset_times[i] for i in valid]
+                if word_labels is not None:
+                    word_labels = [word_labels[i] for i in valid]
+
+        D = librosa.stft(y, n_fft=n_fft, hop_length=hop_length, center=True)
+        S_db = librosa.amplitude_to_db(np.abs(D), ref=np.max)
+
+        plt.figure(figsize=(12, 6))
+        librosa.display.specshow(S_db, sr=sr, hop_length=hop_length, x_axis='time', y_axis='hz', cmap=cmap)
+        plt.colorbar(format='%+2.0f dB')
+        plt.title(display_persian_text('Acoustic Spectrogram'))
+        plt.xlabel('Time (s)')
+        plt.ylabel('Frequency (Hz)')
+
+        if word_onset_times is not None and len(word_onset_times) > 0:
+            onset_times = np.asarray(word_onset_times, dtype=float)
+            word_labels = word_labels if (word_labels is not None and len(word_labels) == len(onset_times)) else None
+        else:
+            # Get onsets directly in seconds to avoid frame/time mismatch
+            onset_times = librosa.onset.onset_detect(y=y, sr=sr, hop_length=hop_length, units='time')  # [web:1][web:5]
+            word_labels = None
+
+        plt.vlines(onset_times, 0, sr/2, color='r', alpha=0.9, linestyle='--', label='Onsets')
+
+        if word_labels is not None:
+            text_y = sr/2 * 0.95
+            for t_i, lab in zip(onset_times, word_labels):
+                plt.text(t_i, text_y, display_persian_text(str(lab)),
+                         color='cyan', fontsize=10, ha='center', va='top',
+                         bbox=dict(facecolor='black', alpha=0.5, edgecolor='none', boxstyle='round,pad=0.2'))
+
+        plt.legend()
+        plt.tight_layout()
+
+        if save_path:
+            plt.savefig(save_path, dpi=300, bbox_inches='tight')
+
+        plt.show()
+
+    except Exception as e:
+        print(f"Error: {e}")
+        print("pip install librosa matplotlib pandas pysoundfile audioread python-bidi arabic-reshaper")
+
+# --- IO config ---
+excel_file_path = r"D:\MeDo\main_Language\thesis\Stimuli\Stimulus_timestamps.xlsx"
+sheet_name = '27'
+audio_file_path = r"D:\MeDo\main_Language\thesis\Stimuli\27.wav"
+output_image_path = os.path.join(os.path.dirname(audio_file_path), f"spectrogram_{sheet_name}.png")
+
+# --- Load onsets (and optional labels) from Excel ---
+my_word_onsets, my_word_labels = [], None
+try:
+    df = pd.read_excel(excel_file_path, sheet_name=sheet_name)
+    if 'start' in df.columns:
+        my_word_onsets = df['start'].astype(float).tolist()
+    if 'word' in df.columns:
+        my_word_labels = df['word'].astype(str).tolist()
+except Exception as e:
+    print(f"Excel read warning: {e}")
+
+# --- Run ---
+generate_spectrograms(audio_path=audio_file_path,
+                      word_onset_times=my_word_onsets,
+                      word_labels=my_word_labels,
+                      save_path=output_image_path,
+                      n_fft=2048,
+                      hop_length=512,
+                      cmap='viridis')
