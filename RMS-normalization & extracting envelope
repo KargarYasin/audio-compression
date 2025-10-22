@@ -1,0 +1,102 @@
+import librosa
+import librosa.display
+import matplotlib.pyplot as plt
+import numpy as np
+import soundfile as sf
+from scipy.signal import butter, lfilter
+import os # Import os for path manipulation
+
+# --- Configuration Parameters ---
+AUDIO_PATH = r"D:\MeDo\main_Language\thesis\Stimuli\27.wav"
+TARGET_RMS_DBFS = -20.0  # Desired RMS level in dBFS for normalization
+ENVELOPE_SMOOTHING_WINDOW_SEC = 0.02 # Smoothing window for envelope (seconds); set to None for no smoothing
+OUTPUT_PLOT_FILENAME = "waveform_analysis.png" # Filename for the saved plot
+
+def apply_lowpass_filter(data, cutoff_freq, sample_rate, order=4):
+    """Applies a Butterworth low-pass filter."""
+    nyquist_freq = 0.5 * sample_rate
+    normalized_cutoff = cutoff_freq / nyquist_freq
+    b, a = butter(order, normalized_cutoff, btype='low', analog=False)
+    filtered_data = lfilter(b, a, data)
+    return filtered_data
+
+def process_and_plot_audio(audio_path, target_rms_dbfs, smoothing_window_sec=None, output_plot_filename=None):
+    """
+    Loads, RMS-normalizes, extracts envelope, plots waveforms, and saves processed audio and plot.
+
+    Args:
+        audio_path (str): Path to the audio file.
+        target_rms_dbfs (float): Target RMS level in dBFS.
+        smoothing_window_sec (float, optional): Window for envelope smoothing in seconds.
+        output_plot_filename (str, optional): Filename to save the plot (e.g., "plot.png").
+    Returns:
+        tuple: (y_scaled, sr) - The scaled audio time series and sampling rate.
+    """
+    try:
+        y, sr = librosa.load(audio_path, sr=None)
+        
+        # Calculate current RMS
+        current_rms = np.sqrt(np.mean(y**2))
+        
+        # RMS Normalization
+        if current_rms == 0:
+            print("Warning: Audio is silent; RMS normalization skipped.")
+            y_scaled = y
+        else:
+            target_rms_linear = 10**(target_rms_dbfs / 20.0)
+            scaling_factor = target_rms_linear / current_rms
+            y_scaled = np.clip(y * scaling_factor, -1.0, 1.0)
+        
+        # Envelope Extraction
+        envelope = np.abs(y_scaled)
+        if smoothing_window_sec is not None and smoothing_window_sec > 0:
+            cutoff_freq = 1 / smoothing_window_sec
+            envelope = apply_lowpass_filter(envelope, cutoff_freq, sr)
+
+        # --- Visualization ---
+        time = np.linspace(0, len(y) / sr, num=len(y))
+        plt.figure(figsize=(12, 6))
+
+        plt.subplot(2, 1, 1)
+        librosa.display.waveshow(y, sr=sr, color='blue', alpha=0.7)
+        plt.title('Original Waveform')
+        plt.ylabel('Amplitude')
+        plt.grid(True)
+
+        plt.subplot(2, 1, 2)
+        librosa.display.waveshow(y_scaled, sr=sr, color='green', alpha=0.7, label='Normalized Waveform')
+        plt.plot(time, envelope, color='red', linewidth=1.5, label='Envelope')
+        plt.title(f'Normalized Waveform (RMS: {target_rms_dbfs:.1f} dBFS) and Envelope')
+        plt.xlabel('Time (s)')
+        plt.ylabel('Amplitude')
+        plt.grid(True)
+        plt.legend(loc='upper right')
+        plt.tight_layout()
+        
+        # Save the plot to a PNG file
+        if output_plot_filename:
+            plt.savefig(output_plot_filename, dpi=300) # dpi for higher resolution
+            print(f"Plot saved as: {output_plot_filename}")
+        plt.show() # Display the plot window
+
+        # --- Save Processed Audio ---
+        output_audio_filename = f"normalized_{os.path.basename(audio_path)}" # Get original filename without path
+        sf.write(output_audio_filename, y_scaled, sr)
+        print(f"Processed audio saved as: {output_audio_filename}")
+
+        return y_scaled, sr
+
+    except FileNotFoundError:
+        print(f"Error: Audio file '{audio_path}' not found.")
+        return None, None
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return None, None
+
+# --- Execution ---
+processed_audio, sr_out = process_and_plot_audio(
+    AUDIO_PATH,
+    target_rms_dbfs=TARGET_RMS_DBFS,
+    smoothing_window_sec=ENVELOPE_SMOOTHING_WINDOW_SEC,
+    output_plot_filename=OUTPUT_PLOT_FILENAME
+)
