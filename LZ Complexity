@@ -1,0 +1,73 @@
+import numpy as np
+import librosa
+import matplotlib.pyplot as plt
+from typing import List
+
+def lz_complexity(tokens: List[int]) -> int:
+    i, n = 0, len(tokens)
+    phrases = set()
+    complexity = 0
+    while i < n:
+        j = i + 1
+        while j <= n and tuple(tokens[i:j]) in phrases:
+            j += 1
+        if j <= n:
+            phrases.add(tuple(tokens[i:j]))
+        complexity += 1
+        i = j
+    return complexity
+
+def process_signal(signal: np.ndarray, quantize_levels: int = 2) -> List[int]:
+    # Flatten and quantize signal to discrete tokens
+    signal = signal.ravel()
+    if quantize_levels < 2:
+        raise ValueError("Quantize levels must be at least 2.")
+    normalized = (signal - np.min(signal)) / (np.max(signal) - np.min(signal))
+    discrete = np.floor(normalized * quantize_levels).astype(int)
+    return discrete.tolist()
+
+def compute_lz_for_wav(file_path: str, quantize_levels: int = 2) -> int:
+    audio, sr = librosa.load(file_path, sr=None)
+    return lz_complexity(process_signal(audio, quantize_levels))
+
+if __name__ == "__main__":
+    quantize_levels = 4
+    results = []  # List of tuples (original_index, complexity)
+
+    # Compute complexity for each WAV file
+    for i in range(1, 41):
+        filename = f"{i:02d}.wav"  # 01.wav to 40.wav
+        try:
+            c = compute_lz_for_wav(filename, quantize_levels)
+        except Exception as e:
+            print(f"Error in {filename}: {e}")
+            c = np.nan
+        results.append((i, c))
+
+    # Sort by complexity (ascending)
+    sorted_results = sorted(results, key=lambda x: x[1])
+    sorted_indices = [t[0] for t in sorted_results]    # original file indices
+    sorted_complexities = [t[1] for t in sorted_results]
+
+    # Prepare colors: every 8 bars same color
+    colors = ['b', 'g', 'r', 'c', 'm', 'y', 'k', '#ff7f0e']
+    bar_colors = [colors[(idx // 8) % len(colors)] for idx in range(len(sorted_complexities))]
+
+    # Plot bar chart
+    plt.figure(figsize=(14, 6))
+    x = np.arange(len(sorted_complexities))
+    plt.bar(x, sorted_complexities, color=bar_colors)
+
+    # Label x-axis with original file indices
+    plt.xticks(x, [f"{orig:02d}" for orig in sorted_indices], rotation=90)
+    plt.xlabel('Original File Index (XX.wav)', fontsize=12)
+    plt.ylabel('LZ Complexity', fontsize=12)
+    plt.title('Sorted LZ Complexity for 40 .wav Files (Asc) with 8-Bar Color Groups', fontsize=14)
+    plt.grid(axis='y')
+    plt.tight_layout()
+
+    # Save figure as image file
+    plt.savefig('lz_complexity_wav_sorted.png', dpi=300, bbox_inches='tight')
+    print("Bar chart saved as 'lz_complexity_wav_sorted.png'")
+
+    plt.show()
